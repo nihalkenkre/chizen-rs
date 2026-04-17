@@ -1,0 +1,43 @@
+[package]
+name = "chizen-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpu-allocator = { version = "0.28.0", default-features = false, features = [
+   "hashbrown",
+   "std",
+   "vulkan",
+] }
+vk-mem = "0.5.0"
+gltf = { version = "1.4.1", features = [
+   "KHR_lights_punctual",
+   "KHR_texture_transform",
+   "KHR_materials_emissive_strength",
+   "KHR_materials_transmission",
+   "KHR_materials_ior",
+   "KHR_materials_volume",
+   "extras",
+] }
+nalgebra-glm = "0.20.0"
+meshopt = "0.6.2"
+bytemuck = "1.25.0"
+ash = { version = "0.38.0", features = ["linked"] }
+ash-window = "0.13.0"
+rand = "0.10.0"
+dear-imgui-rs = { version = "0.10.0", default-features = false }
+dear-imgui-ash = { version = "0.10.0", features = ["dynamic-rendering"] }
+dear-imgui-winit = "0.10.0"
+dear-file-browser = { version = "0.10.0", default-features = false, features = [
+   "imgui",
+] }
+serde_json = "1.0.149"
+winit = { version = "0.30.13", default-features = false, features = [
+   "ahash",
+   "bytemuck",
+   "memmap2",
+   "percent-encoding",
+   "rwh_06",
+   "sctk",
+   "sctk-adwaita",
+] }
