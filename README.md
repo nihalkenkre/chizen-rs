@@ -1,8 +1,8 @@
-# Chizen
+# Chizen-rs
 
 A path tracer written in Rust, implementing the algorithm explained at [PBR without the (brdf/pdf)](http://nihalkenkre.github.io/pbr_without_brdf_pdf). 
 
-It is the prelude to [Satori](http://www.github.com/nihalkenkre/satori), and a successor to [Chizen](http://www.github.com/nihalkenkre/chizen).
+It is the prelude to [Satori](http://www.github.com/nihalkenkre/satori), and a successor to [Chizen](http://www.github.com/nihalkenkre/chizen/tree/dev).
 
 Execute `cargo r --release` on the command line in the root folder.
 
