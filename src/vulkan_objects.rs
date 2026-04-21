@@ -2486,7 +2486,7 @@ impl TLAS {
             device,
             vk::BufferUsageFlags::TRANSFER_DST
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-            (instances.len() * size_of_val(&instances[0])) as vk::DeviceSize,
+            (instances.len() * size_of::<vk::AccelerationStructureInstanceKHR>()) as vk::DeviceSize,
             debug_utils,
             None,
             "instances",

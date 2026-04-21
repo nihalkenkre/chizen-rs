@@ -228,7 +228,7 @@ impl<'instance_lifetime> ApplicationHandler<events::UserEvent> for Application<'
                 let random_states = allocator.create_buffer_on_device(
                     &device,
                     vk::BufferUsageFlags::TRANSFER_DST,
-                    (random_states.len() * size_of_val(&random_states[0])) as vk::DeviceSize,
+                    (random_states.len() * size_of::<u32>()) as vk::DeviceSize,
                     &debug_utils,
                     None,
                     "random states",
