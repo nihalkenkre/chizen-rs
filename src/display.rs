@@ -285,7 +285,7 @@ impl Display {
         let geometry_buffer_resource = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-            (verts.len() * size_of_val(&verts[0])) as vk::DeviceSize,
+            (verts.len() * size_of::<f32>()) as vk::DeviceSize,
             debug_utils,
             None,
             "display geometry",
@@ -403,7 +403,7 @@ impl Display {
             }
         }
 
-        // change the presentation image layout for color attachment, clear the image, setup rendering info 
+        // change the presentation image layout for color attachment, clear the image, setup rendering info
         let cmd_buff_bi = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 

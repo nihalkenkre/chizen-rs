@@ -1,4 +1,5 @@
 use gltf::json::extensions::mesh;
+use meshopt::Meshlet;
 use nalgebra_glm::{self as glm};
 use std::{f64::consts::E, ffi::CStr};
 
@@ -913,186 +914,20 @@ impl Scene {
                         .collect::<Vec<u32>>();
 
                     // get the average emission for the mesh, if more than 0 then the mesh will be added to the mesh emitter list
-                    let avg_emission: [f32; 3] = match curr_prim.material().emissive_texture() {
-                        Some(texture) => {
-                            let mut total_sum: u32 = 0;
-
-                            let image = images.get(texture.texture().source().index()).unwrap();
-
-                            let avg_emission: [f32; 3] = match image.format {
-                                gltf::image::Format::R8G8B8A8 => {
-                                    let mut pixels_u32: Vec<u32> = vec![];
-
-                                    for pixel in &image.pixels {
-                                        pixels_u32.push(*pixel as u32);
-                                    }
-
-                                    let pixels =
-                                        unsafe { pixels_u32.align_to::<[u32; 4]>().1.to_vec() };
-
-                                    let pixels_len = pixels.len() as u32;
-                                    let sum_pixels = pixels
-                                        .into_iter()
-                                        .reduce(|acc, e| {
-                                            [
-                                                acc[0] + e[0],
-                                                acc[1] + e[1],
-                                                acc[2] + e[2],
-                                                acc[3] + e[3],
-                                            ]
-                                        })
-                                        .unwrap();
-
-                                    [
-                                        (sum_pixels[0] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[0]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[1] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[1]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[2] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[2]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                    ]
-                                }
-                                gltf::image::Format::R8G8B8 => {
-                                    let mut pixels_u32: Vec<u32> = vec![];
-
-                                    for pixel in &image.pixels {
-                                        pixels_u32.push(*pixel as u32);
-                                    }
-
-                                    let pixels =
-                                        unsafe { pixels_u32.align_to::<[u32; 3]>().1.to_vec() };
-
-                                    let pixels_len = pixels.len() as u32;
-                                    let sum_pixels = pixels
-                                        .into_iter()
-                                        .reduce(|acc, e| {
-                                            [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2]]
-                                        })
-                                        .unwrap();
-
-                                    [
-                                        (sum_pixels[0] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[0]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[1] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[1]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[2] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[2]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                    ]
-                                }
-                                _ => [0f32, 0f32, 0f32],
-                            };
-
-                            [
-                                curr_prim.material().emissive_factor()[0]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[1]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[2]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                            ]
-                        }
-                        None => {
-                            let emission = [
-                                curr_prim.material().emissive_factor()[0]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[1]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[2]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                            ];
-
-                            emission
-                        }
-                    };
+                    let avg_emission = Scene::get_average_emission(&curr_prim, images);
 
                     // calculate area of the mesh, and add it to mesh emitter list.
                     if avg_emission[0] > 0f32 || avg_emission[1] > 0f32 || avg_emission[2] > 0f32 {
-                        let mut tri_areas = vec![];
-
+                        let prim_area = Scene::get_area_of_primitive(
+                            &node,
+                            &curr_pos,
+                            &curr_indices,
+                            vertex_count,
+                        );
+                        
                         let position = node.transform().decomposed().0;
                         let scale = node.transform().decomposed().2;
                         let scale_mat = glm::scale(&glm::identity(), &glm::make_vec3(&scale));
-
-                        let tri_count = curr_indices.len() / 3;
-                        let mut prim_area = 0f32;
-
-                        for t in 0..tri_count {
-                            let v1_tmp = glm::make_vec3(
-                                curr_pos
-                                    .get(*curr_indices.get(t * 3).unwrap() as usize - vertex_count)
-                                    .unwrap(),
-                            );
-                            let v1 = scale_mat * glm::vec4(v1_tmp.x, v1_tmp.y, v1_tmp.z, 0f32);
-
-                            let v2_tmp = glm::make_vec3(
-                                curr_pos
-                                    .get(
-                                        *curr_indices.get(t * 3 + 1).unwrap() as usize
-                                            - vertex_count,
-                                    )
-                                    .unwrap(),
-                            );
-                            let v2 = scale_mat * glm::vec4(v2_tmp.x, v2_tmp.y, v2_tmp.z, 0f32);
-
-                            let v3_tmp = glm::make_vec3(
-                                curr_pos
-                                    .get(
-                                        *curr_indices.get(t * 3 + 2).unwrap() as usize
-                                            - vertex_count,
-                                    )
-                                    .unwrap(),
-                            );
-                            let v3 = scale_mat * glm::vec4(v3_tmp.x, v3_tmp.y, v3_tmp.z, 0f32);
-
-                            let v2v1 = v2 - v1;
-                            let v3v1 = v3 - v1;
-
-                            let tri_area = glm::magnitude(&glm::cross(
-                                &glm::vec3(v3v1.x, v3v1.y, v3v1.z),
-                                &glm::vec3(v2v1.x, v2v1.y, v2v1.z),
-                            )) * 0.5;
-
-                            prim_area += tri_area;
-                            tri_areas.push(tri_area);
-                        }
-
-                        let mut tri_probs = vec![];
-
-                        for tri_area in &tri_areas {
-                            tri_probs.push(tri_area / prim_area);
-                        }
-
-                        let mut tri_cdf = vec![];
-
-                        let mut cdf = 0f32;
-                        for tri_prob in &tri_probs {
-                            cdf += tri_prob;
-                            tri_cdf.push(cdf);
-                        }
 
                         mesh_emitters.push(MeshEmitter {
                             bounding_box_min: [
@@ -1254,7 +1089,7 @@ impl Scene {
         let camera_instances = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (camera_instances.len() * size_of_val(&camera_instances[0])) as vk::DeviceSize,
+            (camera_instances.len() * size_of::<CameraInstance>()) as vk::DeviceSize,
             debug_utils,
             None,
             "camera matrices",
@@ -1272,7 +1107,7 @@ impl Scene {
         let model_matrices = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (model_matrices.len() * size_of_val(&model_matrices[0])) as vk::DeviceSize,
+            (model_matrices.len() * size_of::<glm::Mat4>()) as vk::DeviceSize,
             debug_utils,
             None,
             "model matrices",
@@ -1290,7 +1125,7 @@ impl Scene {
         let materials_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (materials.len() * size_of_val(&materials[0])) as vk::DeviceSize,
+            (materials.len() * size_of::<Material>()) as vk::DeviceSize,
             debug_utils,
             None,
             "materials",
@@ -1312,7 +1147,7 @@ impl Scene {
             punctual_lights_buffer = allocator.create_buffer_on_device(
                 device,
                 vk::BufferUsageFlags::TRANSFER_DST,
-                (punctual_lights.len() * size_of_val(&punctual_lights[0])) as vk::DeviceSize,
+                (punctual_lights.len() * size_of::<PunctualLight>()) as vk::DeviceSize,
                 debug_utils,
                 None,
                 "punctual lights",
@@ -1335,7 +1170,7 @@ impl Scene {
             mesh_emitters_buffer = allocator.create_buffer_on_device(
                 device,
                 vk::BufferUsageFlags::TRANSFER_DST,
-                (mesh_emitters.len() * size_of_val(&mesh_emitters[0])) as vk::DeviceSize,
+                (mesh_emitters.len() * size_of::<MeshEmitter>()) as vk::DeviceSize,
                 debug_utils,
                 None,
                 "mesh emitters",
@@ -1347,7 +1182,7 @@ impl Scene {
             &indices,
             &meshopt::VertexDataAdapter::new(
                 unsafe { &positions.as_flattened().align_to::<u8>().1 },
-                size_of_val(&positions[0]),
+                size_of::<[f32; 3]>(),
                 0,
             )
             .unwrap(),
@@ -1411,7 +1246,7 @@ impl Scene {
         let meshlets_positions_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (meshlets_positions.len() * size_of_val(&meshlets_positions[0])) as vk::DeviceSize,
+            (meshlets_positions.len() * size_of::<[f32; 3]>()) as vk::DeviceSize,
             debug_utils,
             None,
             "meshlets positions",
@@ -1429,8 +1264,7 @@ impl Scene {
         let meshlets_vertices_data_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (meshlets_vertices_data.len() * size_of_val(&meshlets_vertices_data[0]))
-                as vk::DeviceSize,
+            (meshlets_vertices_data.len() * size_of::<viewport::VertexData>()) as vk::DeviceSize,
             debug_utils,
             None,
             "meshlets vertices data",
@@ -1448,7 +1282,7 @@ impl Scene {
         let meshlets_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (meshlets.len() * size_of_val(&meshlets.get(0))) as vk::DeviceSize,
+            (meshlets.len() * size_of::<Meshlet>()) as vk::DeviceSize,
             debug_utils,
             None,
             "meshlets",
@@ -1466,7 +1300,7 @@ impl Scene {
         let meshlets_triangles_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (meshlets_triangles.len() * size_of_val(&meshlets_triangles[0])) as vk::DeviceSize,
+            (meshlets_triangles.len() * size_of::<u32>()) as vk::DeviceSize,
             debug_utils,
             None,
             "meshlets triangles",
@@ -1484,7 +1318,7 @@ impl Scene {
         let meshlets_vertices_buffer = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (meshlets.vertices.len() * size_of_val(&meshlets.vertices[0])) as vk::DeviceSize,
+            (meshlets.vertices.len() * size_of::<u32>()) as vk::DeviceSize,
             debug_utils,
             None,
             "meshlets vertices",
@@ -1719,5 +1553,145 @@ impl Scene {
         allocator.destroy_buffer_resource(device, self.meshlets_buffer);
         allocator.destroy_buffer_resource(device, self.meshlets_triangles_buffer);
         allocator.destroy_buffer_resource(device, self.meshlets_vertices_buffer);
+    }
+
+    fn get_average_emission(curr_prim: &gltf::Primitive, images: &[gltf::image::Data]) -> [f32; 3] {
+        match curr_prim.material().emissive_texture() {
+            Some(texture) => {
+                let mut total_sum: u32 = 0;
+
+                let image = images.get(texture.texture().source().index()).unwrap();
+
+                let avg_emission: [f32; 3] = match image.format {
+                    gltf::image::Format::R8G8B8A8 => {
+                        let mut pixels_u32: Vec<u32> = vec![];
+
+                        for pixel in &image.pixels {
+                            pixels_u32.push(*pixel as u32);
+                        }
+
+                        let pixels = unsafe { pixels_u32.align_to::<[u32; 4]>().1.to_vec() };
+
+                        let pixels_len = pixels.len() as u32;
+                        let sum_pixels = pixels
+                            .into_iter()
+                            .reduce(|acc, e| {
+                                [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2], acc[3] + e[3]]
+                            })
+                            .unwrap();
+
+                        [
+                            (sum_pixels[0] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[0]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[1] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[1]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[2] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[2]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                        ]
+                    }
+                    gltf::image::Format::R8G8B8 => {
+                        let mut pixels_u32: Vec<u32> = vec![];
+
+                        for pixel in &image.pixels {
+                            pixels_u32.push(*pixel as u32);
+                        }
+
+                        let pixels = unsafe { pixels_u32.align_to::<[u32; 3]>().1.to_vec() };
+
+                        let pixels_len = pixels.len() as u32;
+                        let sum_pixels = pixels
+                            .into_iter()
+                            .reduce(|acc, e| [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2]])
+                            .unwrap();
+
+                        [
+                            (sum_pixels[0] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[0]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[1] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[1]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[2] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[2]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                        ]
+                    }
+                    _ => [0f32, 0f32, 0f32],
+                };
+
+                [
+                    curr_prim.material().emissive_factor()[0]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[1]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[2]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                ]
+            }
+            None => {
+                let emission = [
+                    curr_prim.material().emissive_factor()[0]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[1]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[2]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                ];
+
+                emission
+            }
+        }
+    }
+
+    fn get_area_of_primitive(
+        node: &gltf::Node,
+        positions: &Vec<[f32; 3]>,
+        indices: &Vec<u32>,
+        vertex_count: usize,
+    ) -> f32 {
+        let position = node.transform().decomposed().0;
+        let scale = node.transform().decomposed().2;
+        let scale_mat = glm::scale(&glm::identity(), &glm::make_vec3(&scale));
+
+        let tri_count = indices.len() / 3;
+        let mut prim_area = 0f32;
+
+        for t in 0..tri_count {
+            let v1_tmp = glm::make_vec3(
+                positions
+                    .get(*indices.get(t * 3).unwrap() as usize - vertex_count)
+                    .unwrap(),
+            );
+            let v1 = scale_mat * glm::vec4(v1_tmp.x, v1_tmp.y, v1_tmp.z, 0f32);
+
+            let v2_tmp = glm::make_vec3(
+                positions
+                    .get(*indices.get(t * 3 + 1).unwrap() as usize - vertex_count)
+                    .unwrap(),
+            );
+            let v2 = scale_mat * glm::vec4(v2_tmp.x, v2_tmp.y, v2_tmp.z, 0f32);
+
+            let v3_tmp = glm::make_vec3(
+                positions
+                    .get(*indices.get(t * 3 + 2).unwrap() as usize - vertex_count)
+                    .unwrap(),
+            );
+            let v3 = scale_mat * glm::vec4(v3_tmp.x, v3_tmp.y, v3_tmp.z, 0f32);
+
+            let v2v1 = v2 - v1;
+            let v3v1 = v3 - v1;
+
+            let tri_area = glm::magnitude(&glm::cross(
+                &glm::vec3(v3v1.x, v3v1.y, v3v1.z),
+                &glm::vec3(v2v1.x, v2v1.y, v2v1.z),
+            )) * 0.5;
+
+            prim_area += tri_area;
+        }
+
+        prim_area
     }
 }

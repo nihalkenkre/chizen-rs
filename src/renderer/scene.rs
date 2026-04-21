@@ -577,131 +577,17 @@ impl Scene {
                         .into_u32()
                         .collect::<Vec<u32>>();
 
-                    // alignement required to create the BLAS
+                    // alignment required to create the BLAS
                     indices.resize(aligned_size!(indices.len(), size_of::<u32>()), 0);
 
-                    // alignement required to create the BLAS
+                    // alignment required to create the BLAS
                     positions.resize(
                         aligned_size!(positions.len(), size_of::<[f32; 3]>()),
                         [0f32; 3],
                     );
 
-                    // get the average emission for the mesh, if more than 0 then the mesh will be added to the mesh emitter list
-                    let avg_emission: [f32; 3] = match curr_prim.material().emissive_texture() {
-                        Some(texture) => {
-                            let mut total_sum: u32 = 0;
-
-                            let image = images.get(texture.texture().source().index()).unwrap();
-
-                            let avg_emission: [f32; 3] = match image.format {
-                                gltf::image::Format::R8G8B8A8 => {
-                                    let mut pixels_u32: Vec<u32> = vec![];
-
-                                    for pixel in &image.pixels {
-                                        pixels_u32.push(*pixel as u32);
-                                    }
-
-                                    let pixels =
-                                        unsafe { pixels_u32.align_to::<[u32; 4]>().1.to_vec() };
-
-                                    let pixels_len = pixels.len() as u32;
-                                    let sum_pixels = pixels
-                                        .into_iter()
-                                        .reduce(|acc, e| {
-                                            [
-                                                acc[0] + e[0],
-                                                acc[1] + e[1],
-                                                acc[2] + e[2],
-                                                acc[3] + e[3],
-                                            ]
-                                        })
-                                        .unwrap();
-
-                                    [
-                                        (sum_pixels[0] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[0]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[1] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[1]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[2] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[2]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                    ]
-                                }
-                                gltf::image::Format::R8G8B8 => {
-                                    let mut pixels_u32: Vec<u32> = vec![];
-
-                                    for pixel in &image.pixels {
-                                        pixels_u32.push(*pixel as u32);
-                                    }
-
-                                    let pixels =
-                                        unsafe { pixels_u32.align_to::<[u32; 3]>().1.to_vec() };
-
-                                    let pixels_len = pixels.len() as u32;
-                                    let sum_pixels = pixels
-                                        .into_iter()
-                                        .reduce(|acc, e| {
-                                            [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2]]
-                                        })
-                                        .unwrap();
-
-                                    [
-                                        (sum_pixels[0] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[0]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[1] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[1]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                        (sum_pixels[2] / pixels_len) as f32 / 255f32
-                                            * curr_prim.material().emissive_factor()[2]
-                                            * curr_prim
-                                                .material()
-                                                .emissive_strength()
-                                                .unwrap_or(1f32),
-                                    ]
-                                }
-                                _ => [0f32, 0f32, 0f32],
-                            };
-
-                            [
-                                curr_prim.material().emissive_factor()[0]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[1]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[2]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                            ]
-                        }
-                        None => {
-                            let emission = [
-                                curr_prim.material().emissive_factor()[0]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[1]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                                curr_prim.material().emissive_factor()[2]
-                                    * curr_prim.material().emissive_strength().unwrap_or(1f32),
-                            ];
-
-                            emission
-                        }
-                    };
+                    // get the average emission for the primitive, if more than 0 then the mesh will be added to the mesh emitter list
+                    let avg_emission = Scene::get_average_emission(&curr_prim, images);
 
                     let mut is_emissive = false;
 
@@ -782,7 +668,7 @@ impl Scene {
             device,
             vk::BufferUsageFlags::TRANSFER_DST
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-            (positions.len() * size_of_val(&positions[0])) as vk::DeviceSize,
+            (positions.len() * size_of::<[f32; 3]>()) as vk::DeviceSize,
             debug_utils,
             None,
             "positions",
@@ -801,7 +687,7 @@ impl Scene {
             device,
             vk::BufferUsageFlags::TRANSFER_DST
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-            (indices.len() * size_of_val(&indices[0])) as vk::DeviceSize,
+            (indices.len() * size_of::<u32>()) as vk::DeviceSize,
             debug_utils,
             None,
             "indices",
@@ -819,7 +705,7 @@ impl Scene {
         let vertices_data_resource = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST,
-            (vertices_data.len() * size_of_val(&vertices_data[0])) as vk::DeviceSize,
+            (vertices_data.len() * size_of::<viewport::VertexData>()) as vk::DeviceSize,
             debug_utils,
             None,
             "vertices data",
@@ -841,7 +727,7 @@ impl Scene {
                 device,
                 vk::BufferUsageFlags::TRANSFER_DST
                     | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-                (light_bboxes.len() * size_of_val(&light_bboxes[0])) as vk::DeviceSize,
+                (light_bboxes.len() * size_of::<ash::vk::AabbPositionsKHR>()) as vk::DeviceSize,
                 debug_utils,
                 None,
                 "light bboxes",
@@ -940,7 +826,7 @@ impl Scene {
         let rg_sbt = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
-            (rg_group_handle.len() * size_of_val(&rg_group_handle[0])) as vk::DeviceSize,
+            (rg_group_handle.len() * size_of::<u8>()) as vk::DeviceSize,
             debug_utils,
             Some(raytracing_properties.shader_group_base_alignment as u64),
             "rg sbt",
@@ -977,7 +863,7 @@ impl Scene {
         let ms_sbt = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
-            (ms_group_handles.len() * size_of_val(&ms_group_handles[0])) as vk::DeviceSize,
+            (ms_group_handles.len() * size_of::<u8>()) as vk::DeviceSize,
             debug_utils,
             Some(raytracing_properties.shader_group_base_alignment as u64),
             "ms sbt",
@@ -1187,7 +1073,7 @@ impl Scene {
         let hg_sbt = allocator.create_buffer_on_device(
             device,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
-            (hit_group_handles.len() * size_of_val(&hit_group_handles[0])) as vk::DeviceSize,
+            (hit_group_handles.len() * size_of::<u8>()) as vk::DeviceSize,
             debug_utils,
             Some(raytracing_properties.shader_group_base_alignment as u64),
             "hg sbt",
@@ -1545,4 +1431,96 @@ impl Scene {
             &mut self.light_bboxes_allocation,
         );
     }
+
+    fn get_average_emission(curr_prim: &gltf::Primitive, images: &[gltf::image::Data]) -> [f32; 3] {
+        match curr_prim.material().emissive_texture() {
+            Some(texture) => {
+                let mut total_sum: u32 = 0;
+
+                let image = images.get(texture.texture().source().index()).unwrap();
+
+                let avg_emission: [f32; 3] = match image.format {
+                    gltf::image::Format::R8G8B8A8 => {
+                        let mut pixels_u32: Vec<u32> = vec![];
+
+                        for pixel in &image.pixels {
+                            pixels_u32.push(*pixel as u32);
+                        }
+
+                        let pixels = unsafe { pixels_u32.align_to::<[u32; 4]>().1.to_vec() };
+
+                        let pixels_len = pixels.len() as u32;
+                        let sum_pixels = pixels
+                            .into_iter()
+                            .reduce(|acc, e| {
+                                [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2], acc[3] + e[3]]
+                            })
+                            .unwrap();
+
+                        [
+                            (sum_pixels[0] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[0]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[1] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[1]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[2] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[2]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                        ]
+                    }
+                    gltf::image::Format::R8G8B8 => {
+                        let mut pixels_u32: Vec<u32> = vec![];
+
+                        for pixel in &image.pixels {
+                            pixels_u32.push(*pixel as u32);
+                        }
+
+                        let pixels = unsafe { pixels_u32.align_to::<[u32; 3]>().1.to_vec() };
+
+                        let pixels_len = pixels.len() as u32;
+                        let sum_pixels = pixels
+                            .into_iter()
+                            .reduce(|acc, e| [acc[0] + e[0], acc[1] + e[1], acc[2] + e[2]])
+                            .unwrap();
+
+                        [
+                            (sum_pixels[0] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[0]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[1] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[1]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                            (sum_pixels[2] / pixels_len) as f32 / 255f32
+                                * curr_prim.material().emissive_factor()[2]
+                                * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                        ]
+                    }
+                    _ => [0f32, 0f32, 0f32],
+                };
+
+                [
+                    curr_prim.material().emissive_factor()[0]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[1]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[2]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                ]
+            }
+            None => {
+                let emission = [
+                    curr_prim.material().emissive_factor()[0]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[1]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                    curr_prim.material().emissive_factor()[2]
+                        * curr_prim.material().emissive_strength().unwrap_or(1f32),
+                ];
+
+                emission
+            }
+        }
+    }
+
 }
